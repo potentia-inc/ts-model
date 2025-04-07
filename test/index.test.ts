@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { ConflictError, NotFoundError } from '../src/error.js'
 import {
   existsOrNil,
+  valueOrAbsent,
   Filter,
   InsertionOf,
   Model,
@@ -263,6 +264,15 @@ describe('model', () => {
   })
 
   test('utilities', () => {
+    expect(valueOrAbsent(Nil)).toMatchObject({ $exists: false })
+    expect(valueOrAbsent(null)).toMatchObject({ $exists: false })
+    expect(valueOrAbsent(true)).toBe(true)
+    expect(valueOrAbsent(false)).toBe(false)
+    expect(valueOrAbsent(123)).toBe(123)
+    expect(valueOrAbsent('foo')).toBe('foo')
+    expect(valueOrAbsent([0, 1])).toMatchObject([0, 1])
+    expect(valueOrAbsent({ foo: 'bar' })).toMatchObject({ foo: 'bar' })
+
     expect(existsOrNil(Nil)).toBe(Nil)
     expect(existsOrNil(null)).toBe(Nil)
     expect(existsOrNil(true)).toMatchObject({ $exists: true })

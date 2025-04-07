@@ -380,6 +380,10 @@ function modelsPickId<
 
 export type InsertionOf<T> = Omit<T, 'created_at'>
 
+export function valueOrAbsent<T>(value?: T | null) {
+  return isNullish(value) ? { $exists: false } : value
+}
+
 export function existsOrNil(
   $exists?: boolean | null,
 ): { $exists: boolean } | Nil {

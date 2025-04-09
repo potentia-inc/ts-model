@@ -87,7 +87,7 @@ export declare function pickIdOrNil(x?: Uuid | Model<UuidDoc>): Uuid | Nil;
 export type Options = CommandOperationOptions & {
     $now?: Date;
 };
-export declare abstract class Models<D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc, M extends Model<D>, Q, I, U> {
+export declare abstract class Models<D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc, M extends Model<D>, Q, I, U, S> {
     readonly connection: Connection;
     constructor(options: {
         connection: Connection;
@@ -100,48 +100,44 @@ export declare abstract class Models<D extends NumberDoc | StringDoc | ObjectIdD
     $inc(values: U, options?: Options): UpdateFilter<D>;
     $set(values: U, options?: Options): UpdateFilter<D>;
     $unset(values: U, options?: Options): UpdateFilter<D>;
+    $sort(sort?: S): TypeOrNil<Sort>;
     find(id: ModelOrId<D, M>, options?: Options): Promise<M>;
-    findOne(query: Q, options?: Options): Promise<TypeOrNil<M>>;
-    findMany(query: Q, pagination?: {
-        sort?: Sort;
-        offset?: number;
-        limit?: number;
-    }, options?: Options): Promise<M[]>;
-    paginate(query: Q, pagination?: Partial<Pagination>, options?: Options): Promise<[Pagination, M[]]>;
-    iterate(query: Q, sort?: Sort, options?: Options): Cursor<D, M>;
-    count(query: Q, options?: Options): Promise<number>;
+    findOne(query?: Q, options?: Options): Promise<TypeOrNil<M>>;
+    findMany(query?: Q, pagination?: Partial<Pagination<S>>, options?: Options): Promise<M[]>;
+    findManyToMapBy<T>(by: (x: M) => T, query?: Q, pagination?: Partial<Pagination<S>>, options?: Options): Promise<Map<T, M>>;
+    iterate(query?: Q, pagination?: Partial<Pagination<S>>, options?: Options): Cursor<D, M>;
+    paginate(query?: Q, pagination?: Partial<Pagination<S>>, options?: Options): Promise<[Pagination<S>, M[]]>;
+    count(query?: Q, options?: Options): Promise<number>;
     insertOne(values: I, options?: Options): Promise<M>;
     insertMany(values: I[], options?: Options): Promise<M[]>;
     updateOne(id: ModelOrId<D, M>, values: U, options?: Options): Promise<M>;
     updateMany(query: Q, values: U, options?: Options): Promise<number>;
     deleteOne(id: ModelOrId<D, M>, options?: Options): Promise<void>;
-    deleteMany(query: Q, options?: Options): Promise<number>;
+    deleteMany(query?: Q, options?: Options): Promise<number>;
 }
 export declare class Cursor<D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc, M extends Model<D>> {
     #private;
-    constructor(map: (d: D | WithId<D>) => M, cursor: FindCursor<WithId<D>>);
-    [Symbol.asyncIterator](): AsyncIterator<M, void>;
+    constructor(model: (d: D | WithId<D>, options?: Options) => M, cursor: FindCursor<WithId<D>>);
+    [Symbol.asyncIterator](): AsyncGenerator<M, void, unknown>;
+    toArray(options?: Options): Promise<M[]>;
 }
-export declare const PAGINATION_ORDERS: readonly ["asc", "desc"];
-export type PaginationOrder = (typeof PAGINATION_ORDERS)[number];
-export type Pagination = {
+export type Pagination<S> = {
+    sort: S;
     offset: number;
     limit: number;
     count: number;
-    key: string;
-    order: PaginationOrder;
     begin?: Date;
     end?: Date;
 };
-export declare function paginate<D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc>(collection: Collection<D>, query: Filter<D>, pagination?: Partial<Pagination>, options?: Options): Promise<[Pagination, WithId<D>[]]>;
+export declare function getSortKey(sort?: Sort): string | undefined;
 export type InsertionOf<T> = Omit<T, 'created_at'>;
-export declare function valueOrAbsent<T>(value?: T | null): T | {
+export declare function toValueOrAbsent<T>(value?: T | null): T | {
     $exists: boolean;
 };
-export declare function existsOrNil($exists?: boolean | null): {
+export declare function toExistsOrNil($exists?: boolean | null): {
     $exists: boolean;
 } | Nil;
-export declare function unsetOrNil<T extends object>(values: T, key: keyof T): true | Nil;
-export declare function queryIn<S, T = S>(x: Nil | null | S | S[], map?: (x: S) => T): T | {
+export declare function toUnsetOrNil<T extends object>(values: T, key: keyof T): true | Nil;
+export declare function toValueOrInOrNil<S, T = S>(x: Nil | null | S | S[], map?: (x: S) => T): T | {
     $in: T[];
 } | Nil;

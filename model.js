@@ -69,6 +69,10 @@ export class Models {
     $unset(values, options) {
         return {};
     }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    $sort(sort) {
+        return Nil;
+    }
     async find(id, options = {}) {
         const _id = modelsPickId(id);
         if (_id !== id)
@@ -78,33 +82,57 @@ export class Models {
             throw new NotFoundError(`Not Found: ${this.name}`);
         return this.$model(found, options);
     }
-    async findOne(query, options = {}) {
+    async findOne(query = {}, options = {}) {
         const found = await this.collection.findOne(this.$query(query, options), options);
         return isNullish(found) ? Nil : this.$model(found, options);
     }
-    async findMany(query, pagination = {}, options = {}) {
+    async findMany(query = {}, pagination = {}, options = {}) {
+        return await this.iterate(query, pagination, options).toArray(options);
+    }
+    async findManyToMapBy(by, query = {}, pagination = {}, options = {}) {
+        const map = new Map();
+        const cursor = this.iterate(query, pagination, options);
+        for await (const x of cursor)
+            map.set(by(x), x);
+        return map;
+    }
+    iterate(query = {}, pagination = {}, options = {}) {
         const cursor = this.collection.find(this.$query(query, options), options);
-        const { sort, offset, limit } = pagination;
+        const { offset, limit } = pagination;
+        const sort = this.$sort(pagination.sort);
         if (!isNullish(sort))
             cursor.sort(sort);
         if (!isNullish(offset))
             cursor.skip(offset);
         if (!isNullish(limit))
             cursor.limit(limit);
-        const found = await cursor.toArray();
-        return found.map((x) => this.$model(x, options));
-    }
-    async paginate(query, pagination = {}, options = {}) {
-        const [paginated, found] = await paginate(this.collection, this.$query(query, options), pagination, options);
-        return [paginated, found.map((x) => this.$model(x, options))];
-    }
-    iterate(query, sort = { created_at: 1 }, options = {}) {
-        const cursor = this.collection
-            .find(this.$query(query, options), options)
-            .sort(sort);
         return new Cursor((x) => this.$model(x, options), cursor);
     }
-    async count(query, options = {}) {
+    async paginate(query = {}, pagination = {}, options = {}) {
+        const max = 1000;
+        const { sort, offset = 0, begin, end } = pagination;
+        assert(!isNullish(sort));
+        const limit = Math.min(pagination.limit ?? max, max);
+        assert(offset >= 0 && Number.isInteger(offset));
+        assert(limit >= 0 && limit <= max && Number.isInteger(limit));
+        const rawsort = this.$sort(sort);
+        const key = getSortKey(rawsort);
+        assert(!isNullish(rawsort) && !isNullish(key));
+        const filter = {
+            ...query,
+            ...(isNullish(begin) && isNullish(end)
+                ? {}
+                : { [key]: { $gte: begin, $lt: end } }),
+        };
+        const count = await this.collection.countDocuments(filter, options);
+        const cursor = this.collection.find(filter, options);
+        const docs = await cursor.sort(rawsort).skip(offset).limit(limit).toArray();
+        return [
+            { sort, offset, limit, count, begin, end },
+            docs.map((x) => this.$model(x, options)),
+        ];
+    }
+    async count(query = {}, options = {}) {
         return await this.collection.countDocuments(this.$query(query, options), options);
     }
     async insertOne(values, options = {}) {
@@ -170,50 +198,31 @@ export class Models {
         if (deletedCount !== 1)
             throw new NotFoundError(`Not Found: ${this.name}`);
     }
-    async deleteMany(query, options = {}) {
+    async deleteMany(query = {}, options = {}) {
         const { deletedCount } = await this.collection.deleteMany(this.$query(query, options), options);
         return deletedCount;
     }
 }
 export class Cursor {
-    #map;
+    #model;
     #cursor;
-    constructor(map, cursor) {
-        this.#map = map;
+    constructor(model, cursor) {
+        this.#model = model;
         this.#cursor = cursor;
     }
-    [Symbol.asyncIterator]() {
-        return {
-            next: async () => await this.#cursor
-                .next()
-                .then((value) => value == null
-                ? { value: Nil, done: true }
-                : { value: this.#map(value), done: false }),
-        };
+    async *[Symbol.asyncIterator]() {
+        try {
+            for await (const x of this.#cursor) {
+                yield this.#model(x);
+            }
+        }
+        finally {
+            await this.#cursor.close();
+        }
     }
-}
-export const PAGINATION_ORDERS = ['asc', 'desc'];
-export async function paginate(collection, query, pagination = {}, options = {}) {
-    const max = 1000;
-    const { offset = 0, order = 'asc', key = 'created_at', begin, end, } = pagination;
-    const limit = Math.min(pagination.limit ?? max, max);
-    assert(offset >= 0 && Number.isInteger(offset));
-    assert(limit >= 0 && limit <= max && Number.isInteger(limit));
-    assert(!isNullish(order));
-    const filter = {
-        ...query,
-        ...(isNullish(begin) && isNullish(end)
-            ? {}
-            : { [key]: { $gte: begin, $lt: end } }),
-    };
-    const count = await collection.countDocuments(filter, options);
-    const cursor = collection.find(filter, options);
-    const docs = await cursor
-        .sort({ [key]: order === 'asc' ? 1 : -1 })
-        .skip(offset)
-        .limit(limit)
-        .toArray();
-    return [{ offset, limit, key, order, count, begin, end }, docs];
+    async toArray(options) {
+        return (await this.#cursor.toArray()).map((x) => this.#model(x, options));
+    }
 }
 function modelsPickId(x) {
     return typeof x === 'number' ||
@@ -223,16 +232,38 @@ function modelsPickId(x) {
         ? x
         : x.id;
 }
-export function valueOrAbsent(value) {
+export function getSortKey(sort) {
+    if (typeof sort === 'string')
+        return sort;
+    if (Array.isArray(sort)) {
+        if (sort.length === 0)
+            return Nil;
+        // [string, SortDirection][]
+        if (Array.isArray(sort[0])) {
+            return sort[0][0];
+        }
+        // string[]
+        return sort[0];
+    }
+    if (sort instanceof Map) {
+        const first = sort.keys().next();
+        return first.done ? Nil : first.value;
+    }
+    if (typeof sort === 'object' && !isNullish(sort)) {
+        return Object.keys(sort)[0];
+    }
+    return Nil;
+}
+export function toValueOrAbsent(value) {
     return isNullish(value) ? { $exists: false } : value;
 }
-export function existsOrNil($exists) {
+export function toExistsOrNil($exists) {
     return isNullish($exists) ? Nil : { $exists };
 }
-export function unsetOrNil(values, key) {
+export function toUnsetOrNil(values, key) {
     return key in values && isNullish(values[key]) ? true : Nil;
 }
-export function queryIn(x, map = (x) => x) {
+export function toValueOrInOrNil(x, map = (x) => x) {
     if (isNullish(x))
         return Nil;
     if (Array.isArray(x))

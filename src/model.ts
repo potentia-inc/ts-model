@@ -139,7 +139,10 @@ export abstract class Models<
     return this.$model(found, options)
   }
 
-  async findOne(query: Q, options: Options = {}): Promise<TypeOrNil<M>> {
+  async findOne(
+    query: Q = {} as Q,
+    options: Options = {},
+  ): Promise<TypeOrNil<M>> {
     const found = await this.collection.findOne(
       this.$query(query, options),
       options,
@@ -148,49 +151,75 @@ export abstract class Models<
   }
 
   async findMany(
-    query: Q,
-    pagination: {
-      sort?: Sort
-      offset?: number
-      limit?: number
-    } = {},
+    query: Q = {} as Q,
+    pagination: MongoPagination = {},
     options: Options = {},
   ): Promise<M[]> {
-    const cursor = this.collection.find(this.$query(query, options), options)
-    const { sort, offset, limit } = pagination
-    if (!isNullish(sort)) cursor.sort(sort)
-    if (!isNullish(offset)) cursor.skip(offset)
-    if (!isNullish(limit)) cursor.limit(limit)
-    const found = await cursor.toArray()
-    return found.map((x) => this.$model(x, options))
+    return await this.iterate(query, pagination, options).toArray(options)
   }
 
-  async paginate(
-    query: Q,
-    pagination: Partial<Pagination> = {},
+  async findManyToMapBy<T>(
+    by: (x: M) => T,
+    query: Q = {} as Q,
+    pagination: MongoPagination = {},
     options: Options = {},
-  ): Promise<[Pagination, M[]]> {
-    const [paginated, found] = await paginate(
-      this.collection,
-      this.$query(query, options),
-      pagination,
-      options,
-    )
-    return [paginated, found.map((x) => this.$model(x, options))]
+  ) {
+    const map = new Map<T, M>()
+    const cursor = this.iterate(query, pagination, options)
+    for await (const x of cursor) map.set(by(x), x)
+    return map
   }
 
   iterate(
-    query: Q,
-    sort: Sort = { created_at: 1 },
+    query: Q = {} as Q,
+    pagination: MongoPagination = {},
     options: Options = {},
   ): Cursor<D, M> {
-    const cursor = this.collection
-      .find(this.$query(query, options), options)
-      .sort(sort)
+    const cursor = this.collection.find(this.$query(query, options), options)
+    const { sort, skip, limit } = pagination
+    if (!isNullish(sort)) cursor.sort(sort)
+    if (!isNullish(skip)) cursor.skip(skip)
+    if (!isNullish(limit)) cursor.limit(limit)
     return new Cursor<D, M>((x) => this.$model(x, options), cursor)
   }
 
-  async count(query: Q, options: Options = {}): Promise<number> {
+  async paginate(
+    query: Q = {} as Q,
+    pagination: Partial<Pagination> = {},
+    options: Options = {},
+  ): Promise<[Pagination, M[]]> {
+    const max = 1000
+    const {
+      offset = 0,
+      order = 'asc',
+      key = 'created_at',
+      begin,
+      end,
+    } = pagination
+    const limit = Math.min(pagination.limit ?? max, max)
+    assert(offset >= 0 && Number.isInteger(offset))
+    assert(limit >= 0 && limit <= max && Number.isInteger(limit))
+    assert(!isNullish(order))
+    const filter = {
+      ...query,
+      ...(isNullish(begin) && isNullish(end)
+        ? {}
+        : { [key as keyof D]: { $gte: begin, $lt: end } }),
+    } as Filter<D>
+    const count = await this.collection.countDocuments(filter, options)
+    const cursor = this.collection.find(filter, options)
+    const docs = await cursor
+      .sort({ [key]: order === 'asc' ? 1 : -1 })
+      .skip(offset)
+      .limit(limit)
+      .toArray()
+    return [
+      { offset, limit, key, order, count, begin, end },
+      docs.map((x) => this.$model(x, options)),
+    ]
+  }
+
+  async count(query: Q = {} as Q, options: Options = {}): Promise<number> {
     return await this.collection.countDocuments(
       this.$query(query, options),
       options,
@@ -283,7 +312,7 @@ export abstract class Models<
     if (deletedCount !== 1) throw new NotFoundError(`Not Found: ${this.name}`)
   }
 
-  async deleteMany(query: Q, options: Options = {}): Promise<number> {
+  async deleteMany(query: Q = {} as Q, options: Options = {}): Promise<number> {
     const { deletedCount } = await this.collection.deleteMany(
       this.$query(query, options),
       options,
@@ -296,74 +325,46 @@ export class Cursor<
   D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc,
   M extends Model<D>,
 > {
-  #map: (d: D | WithId<D>) => M
+  #model: (d: D | WithId<D>, options?: Options) => M
   #cursor: FindCursor<WithId<D>>
 
-  constructor(map: (d: D | WithId<D>) => M, cursor: FindCursor<WithId<D>>) {
-    this.#map = map
+  constructor(
+    model: (d: D | WithId<D>, options?: Options) => M,
+    cursor: FindCursor<WithId<D>>,
+  ) {
+    this.#model = model
     this.#cursor = cursor
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<M, void> {
-    return {
-      next: async () =>
-        await this.#cursor
-          .next()
-          .then((value) =>
-            value == null
-              ? { value: Nil, done: true }
-              : { value: this.#map(value), done: false },
-          ),
+  async *[Symbol.asyncIterator]() {
+    try {
+      for await (const x of this.#cursor) {
+        yield this.#model(x)
+      }
+    } finally {
+      await this.#cursor.close()
     }
+  }
+
+  async toArray(options?: Options) {
+    return (await this.#cursor.toArray()).map((x) => this.#model(x, options))
   }
 }
 
-export const PAGINATION_ORDERS = ['asc', 'desc'] as const
-export type PaginationOrder = (typeof PAGINATION_ORDERS)[number]
+export type MongoPagination = {
+  sort?: Sort
+  skip?: number
+  limit?: number
+}
+
 export type Pagination = {
   offset: number
   limit: number
   count: number
   key: string
-  order: PaginationOrder
+  order: 'asc' | 'desc'
   begin?: Date
   end?: Date
-}
-
-export async function paginate<
-  D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc,
->(
-  collection: Collection<D>,
-  query: Filter<D>,
-  pagination: Partial<Pagination> = {},
-  options: Options = {},
-): Promise<[Pagination, WithId<D>[]]> {
-  const max = 1000
-  const {
-    offset = 0,
-    order = 'asc',
-    key = 'created_at',
-    begin,
-    end,
-  } = pagination
-  const limit = Math.min(pagination.limit ?? max, max)
-  assert(offset >= 0 && Number.isInteger(offset))
-  assert(limit >= 0 && limit <= max && Number.isInteger(limit))
-  assert(!isNullish(order))
-  const filter: Filter<D> = {
-    ...query,
-    ...(isNullish(begin) && isNullish(end)
-      ? {}
-      : { [key]: { $gte: begin, $lt: end } }),
-  }
-  const count = await collection.countDocuments(filter, options)
-  const cursor = collection.find(filter, options)
-  const docs = await cursor
-    .sort({ [key]: order === 'asc' ? 1 : -1 })
-    .skip(offset)
-    .limit(limit)
-    .toArray()
-  return [{ offset, limit, key, order, count, begin, end }, docs]
 }
 
 function modelsPickId<
@@ -380,24 +381,24 @@ function modelsPickId<
 
 export type InsertionOf<T> = Omit<T, 'created_at'>
 
-export function valueOrAbsent<T>(value?: T | null) {
+export function toValueOrAbsent<T>(value?: T | null) {
   return isNullish(value) ? { $exists: false } : value
 }
 
-export function existsOrNil(
+export function toExistsOrNil(
   $exists?: boolean | null,
 ): { $exists: boolean } | Nil {
   return isNullish($exists) ? Nil : { $exists }
 }
 
-export function unsetOrNil<T extends object>(
+export function toUnsetOrNil<T extends object>(
   values: T,
   key: keyof T,
 ): true | Nil {
   return key in values && isNullish(values[key]) ? true : Nil
 }
 
-export function queryIn<S, T = S>(
+export function toValueOrInOrNil<S, T = S>(
   x: Nil | null | S | S[],
   map: (x: S) => T = (x: S) => x as unknown as T,
 ): T | { $in: T[] } | Nil {

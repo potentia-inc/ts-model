@@ -2,19 +2,19 @@ import assert from 'node:assert'
 import { randomBytes } from 'node:crypto'
 import { ConflictError, NotFoundError } from '../src/error.js'
 import {
-  existsOrNil,
-  valueOrAbsent,
   Filter,
   InsertionOf,
   Model,
   ModelOrId,
   Models,
-  pickIdOrNil,
-  queryIn,
-  unsetOrNil,
+  UUID_DOC_SCHEMA,
   UpdateFilter,
   UuidDoc,
-  UUID_DOC_SCHEMA,
+  pickIdOrNil,
+  toExistsOrNil,
+  toUnsetOrNil,
+  toValueOrAbsent,
+  toValueOrInOrNil,
 } from '../src/model.js'
 import { Connection } from '../src/mongo.js'
 import { Nil, isNullish, toUuid } from '../src/type.js'
@@ -103,7 +103,7 @@ class Tests extends Models<TestDoc, Test, TestQuery, TestInsert, TestUpdate> {
   }
 
   $unset(values: TestUpdate): UpdateFilter<TestDoc> {
-    return { bar: unsetOrNil(values, 'bar') }
+    return { bar: toUnsetOrNil(values, 'bar') }
   }
 }
 
@@ -168,12 +168,12 @@ describe('model', () => {
       foo: test.foo,
       createdAt: expect.toEqualDate(test.createdAt),
     })
-    expect(
-      await TESTS.findMany(
-        {},
-        { offset: 0, limit: 100, sort: { created_at: 1 } },
-      ),
-    ).toMatchObject([
+    const pagination = {
+      skip: 0,
+      limit: 100,
+      sort: { created_at: 1 },
+    } as const
+    expect(await TESTS.findMany({}, pagination)).toMatchObject([
       {
         id: expect.toBeUuid(),
         foo: expect.any(String),
@@ -188,13 +188,19 @@ describe('model', () => {
 
     // count, iterate, paginate
     expect(await TESTS.count({})).toBe(2)
-    for await (const test of TESTS.iterate({})) {
+    for await (const test of TESTS.iterate({}, pagination)) {
       expect(test).toMatchObject({
         id: expect.toBeUuid(),
         foo: expect.any(String),
         createdAt: expect.toBeDate(),
       })
     }
+
+    // findManyToMapBy
+    const map = await TESTS.findManyToMapBy((x) => String(x.id), {}, pagination)
+    expect(map.size).toBe(2)
+    expect(map.get(String(test.id))).toMatchObject(test)
+
     const begin = new Date(Date.now() - 86400000)
     const end = new Date(Date.now() + 86400000)
     expect(
@@ -264,30 +270,32 @@ describe('model', () => {
   })
 
   test('utilities', () => {
-    expect(valueOrAbsent(Nil)).toMatchObject({ $exists: false })
-    expect(valueOrAbsent(null)).toMatchObject({ $exists: false })
-    expect(valueOrAbsent(true)).toBe(true)
-    expect(valueOrAbsent(false)).toBe(false)
-    expect(valueOrAbsent(123)).toBe(123)
-    expect(valueOrAbsent('foo')).toBe('foo')
-    expect(valueOrAbsent([0, 1])).toMatchObject([0, 1])
-    expect(valueOrAbsent({ foo: 'bar' })).toMatchObject({ foo: 'bar' })
+    expect(toValueOrAbsent(Nil)).toMatchObject({ $exists: false })
+    expect(toValueOrAbsent(null)).toMatchObject({ $exists: false })
+    expect(toValueOrAbsent(true)).toBe(true)
+    expect(toValueOrAbsent(false)).toBe(false)
+    expect(toValueOrAbsent(123)).toBe(123)
+    expect(toValueOrAbsent('foo')).toBe('foo')
+    expect(toValueOrAbsent([0, 1])).toMatchObject([0, 1])
+    expect(toValueOrAbsent({ foo: 'bar' })).toMatchObject({ foo: 'bar' })
 
-    expect(existsOrNil(Nil)).toBe(Nil)
-    expect(existsOrNil(null)).toBe(Nil)
-    expect(existsOrNil(true)).toMatchObject({ $exists: true })
-    expect(existsOrNil(false)).toMatchObject({ $exists: false })
+    expect(toExistsOrNil(Nil)).toBe(Nil)
+    expect(toExistsOrNil(null)).toBe(Nil)
+    expect(toExistsOrNil(true)).toMatchObject({ $exists: true })
+    expect(toExistsOrNil(false)).toMatchObject({ $exists: false })
 
-    expect(unsetOrNil<{ foo?: unknown }>({}, 'foo')).toBe(Nil)
-    expect(unsetOrNil({ foo: 'bar' }, 'foo')).toBe(Nil)
-    expect(unsetOrNil({ foo: Nil }, 'foo')).toBe(true)
-    expect(unsetOrNil({ foo: null }, 'foo')).toBe(true)
+    expect(toUnsetOrNil<{ foo?: unknown }>({}, 'foo')).toBe(Nil)
+    expect(toUnsetOrNil({ foo: 'bar' }, 'foo')).toBe(Nil)
+    expect(toUnsetOrNil({ foo: Nil }, 'foo')).toBe(true)
+    expect(toUnsetOrNil({ foo: null }, 'foo')).toBe(true)
 
-    expect(queryIn(Nil)).toBe(Nil)
-    expect(queryIn(null)).toBe(Nil)
-    expect(queryIn('foo')).toBe('foo')
-    expect(queryIn(['foo', 'bar'])).toMatchObject({ $in: ['foo', 'bar'] })
-    expect(queryIn(['foo', 'bar'], (x) => x.length)).toMatchObject({
+    expect(toValueOrInOrNil(Nil)).toBe(Nil)
+    expect(toValueOrInOrNil(null)).toBe(Nil)
+    expect(toValueOrInOrNil('foo')).toBe('foo')
+    expect(toValueOrInOrNil(['foo', 'bar'])).toMatchObject({
+      $in: ['foo', 'bar'],
+    })
+    expect(toValueOrInOrNil(['foo', 'bar'], (x) => x.length)).toMatchObject({
       $in: [3, 3],
     })
   })

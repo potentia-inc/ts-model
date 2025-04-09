@@ -95,6 +95,7 @@ export abstract class Models<
   Q,
   I,
   U,
+  S,
 > {
   readonly connection: Connection
 
@@ -130,6 +131,10 @@ export abstract class Models<
   $unset(values: U, options?: Options): UpdateFilter<D> {
     return {}
   }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  $sort(sort?: S): TypeOrNil<Sort> {
+    return Nil
+  }
 
   async find(id: ModelOrId<D, M>, options: Options = {}): Promise<M> {
     const _id = modelsPickId(id)
@@ -152,7 +157,7 @@ export abstract class Models<
 
   async findMany(
     query: Q = {} as Q,
-    pagination: MongoPagination = {},
+    pagination: Partial<Pagination<S>> = {},
     options: Options = {},
   ): Promise<M[]> {
     return await this.iterate(query, pagination, options).toArray(options)
@@ -161,7 +166,7 @@ export abstract class Models<
   async findManyToMapBy<T>(
     by: (x: M) => T,
     query: Q = {} as Q,
-    pagination: MongoPagination = {},
+    pagination: Partial<Pagination<S>> = {},
     options: Options = {},
   ) {
     const map = new Map<T, M>()
@@ -172,49 +177,43 @@ export abstract class Models<
 
   iterate(
     query: Q = {} as Q,
-    pagination: MongoPagination = {},
+    pagination: Partial<Pagination<S>> = {},
     options: Options = {},
   ): Cursor<D, M> {
     const cursor = this.collection.find(this.$query(query, options), options)
-    const { sort, skip, limit } = pagination
+    const { offset, limit } = pagination
+    const sort = this.$sort(pagination.sort)
     if (!isNullish(sort)) cursor.sort(sort)
-    if (!isNullish(skip)) cursor.skip(skip)
+    if (!isNullish(offset)) cursor.skip(offset)
     if (!isNullish(limit)) cursor.limit(limit)
     return new Cursor<D, M>((x) => this.$model(x, options), cursor)
   }
 
   async paginate(
     query: Q = {} as Q,
-    pagination: Partial<Pagination> = {},
+    pagination: Partial<Pagination<S>> = {},
     options: Options = {},
-  ): Promise<[Pagination, M[]]> {
+  ): Promise<[Pagination<S>, M[]]> {
     const max = 1000
-    const {
-      offset = 0,
-      order = 'asc',
-      key = 'created_at',
-      begin,
-      end,
-    } = pagination
+    const { sort, offset = 0, begin, end } = pagination
+    assert(!isNullish(sort))
     const limit = Math.min(pagination.limit ?? max, max)
     assert(offset >= 0 && Number.isInteger(offset))
     assert(limit >= 0 && limit <= max && Number.isInteger(limit))
-    assert(!isNullish(order))
+    const rawsort = this.$sort(sort)
+    const key = getSortKey(rawsort)
+    assert(!isNullish(rawsort) && !isNullish(key))
     const filter = {
       ...query,
       ...(isNullish(begin) && isNullish(end)
         ? {}
-        : { [key as keyof D]: { $gte: begin, $lt: end } }),
+        : { [key]: { $gte: begin, $lt: end } }),
     } as Filter<D>
     const count = await this.collection.countDocuments(filter, options)
     const cursor = this.collection.find(filter, options)
-    const docs = await cursor
-      .sort({ [key]: order === 'asc' ? 1 : -1 })
-      .skip(offset)
-      .limit(limit)
-      .toArray()
+    const docs = await cursor.sort(rawsort).skip(offset).limit(limit).toArray()
     return [
-      { offset, limit, key, order, count, begin, end },
+      { sort, offset, limit, count, begin, end },
       docs.map((x) => this.$model(x, options)),
     ]
   }
@@ -351,18 +350,11 @@ export class Cursor<
   }
 }
 
-export type MongoPagination = {
-  sort?: Sort
-  skip?: number
-  limit?: number
-}
-
-export type Pagination = {
+export type Pagination<S> = {
+  sort: S
   offset: number
   limit: number
   count: number
-  key: string
-  order: 'asc' | 'desc'
   begin?: Date
   end?: Date
 }
@@ -377,6 +369,33 @@ function modelsPickId<
     x instanceof Uuid
     ? x
     : x.id
+}
+
+export function getSortKey(sort?: Sort) {
+  if (typeof sort === 'string') return sort
+
+  if (Array.isArray(sort)) {
+    if (sort.length === 0) return Nil
+
+    // [string, SortDirection][]
+    if (Array.isArray(sort[0])) {
+      return (sort[0] as [string, unknown])[0]
+    }
+
+    // string[]
+    return sort[0] as string
+  }
+
+  if (sort instanceof Map) {
+    const first = sort.keys().next()
+    return first.done ? Nil : first.value
+  }
+
+  if (typeof sort === 'object' && !isNullish(sort)) {
+    return Object.keys(sort)[0]
+  }
+
+  return Nil
 }
 
 export type InsertionOf<T> = Omit<T, 'created_at'>

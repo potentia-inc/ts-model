@@ -10,6 +10,7 @@ import {
   UUID_DOC_SCHEMA,
   UpdateFilter,
   UuidDoc,
+  getSortKey,
   pickIdOrNil,
   toExistsOrNil,
   toUnsetOrNil,
@@ -18,6 +19,7 @@ import {
 } from '../src/model.js'
 import { Connection } from '../src/mongo.js'
 import { Nil, isNullish, toUuid } from '../src/type.js'
+import { option } from '../src/util.js'
 
 const { MONGO_URI } = process.env
 assert(!isNullish(MONGO_URI))
@@ -79,8 +81,18 @@ type TestUpdate = {
   foo?: string
   bar?: number
 }
+type TestSort = {
+  createdAt?: 'asc' | 'desc'
+}
 
-class Tests extends Models<TestDoc, Test, TestQuery, TestInsert, TestUpdate> {
+class Tests extends Models<
+  TestDoc,
+  Test,
+  TestQuery,
+  TestInsert,
+  TestUpdate,
+  TestSort
+> {
   get name(): string {
     return TEST_NAME
   }
@@ -104,6 +116,10 @@ class Tests extends Models<TestDoc, Test, TestQuery, TestInsert, TestUpdate> {
 
   $unset(values: TestUpdate): UpdateFilter<TestDoc> {
     return { bar: toUnsetOrNil(values, 'bar') }
+  }
+
+  $sort(sort: TestSort) {
+    return { ...option('created_at', sort.createdAt) }
   }
 }
 
@@ -169,9 +185,9 @@ describe('model', () => {
       createdAt: expect.toEqualDate(test.createdAt),
     })
     const pagination = {
-      skip: 0,
+      offest: 0,
       limit: 100,
-      sort: { created_at: 1 },
+      sort: { createdAt: 'asc' },
     } as const
     expect(await TESTS.findMany({}, pagination)).toMatchObject([
       {
@@ -207,21 +223,19 @@ describe('model', () => {
       await TESTS.paginate(
         {},
         {
+          sort: { createdAt: 'asc' },
           offset: 0,
           limit: 100,
-          key: 'created_at',
-          order: 'asc',
           begin,
           end,
         },
       ),
     ).toMatchObject([
       {
+        sort: { createdAt: 'asc' },
         offset: 0,
         limit: 100,
         count: 2,
-        order: 'asc',
-        key: 'created_at',
         begin: expect.toEqualDate(begin),
         end: expect.toEqualDate(end),
       },
@@ -267,6 +281,17 @@ describe('model', () => {
     await expect(() => TESTS.deleteOne(test)).rejects.toThrow(NotFoundError)
     expect(await TESTS.deleteMany({})).toBe(1)
     expect(await TESTS.deleteMany({})).toBe(0)
+  })
+
+  test('getSortKey()', () => {
+    expect(getSortKey(Nil)).toBeNil()
+    expect(getSortKey('foo')).toBe('foo')
+    expect(getSortKey(['foo'])).toBe('foo')
+    expect(getSortKey([['foo', 1]])).toBe('foo')
+    expect(getSortKey({ foo: 1 })).toBe('foo')
+    const map = new Map()
+    map.set('foo', 1)
+    expect(getSortKey(map)).toBe('foo')
   })
 
   test('utilities', () => {

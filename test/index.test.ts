@@ -320,7 +320,16 @@ describe('model', () => {
     expect(toValueOrInOrNil(['foo', 'bar'])).toMatchObject({
       $in: ['foo', 'bar'],
     })
+    const arr = ['foo', 'bar'] as const
+    expect(toValueOrInOrNil(arr)).toMatchObject({
+      $in: ['foo', 'bar'],
+    })
     expect(toValueOrInOrNil(['foo', 'bar'], (x) => x.length)).toMatchObject({
+      $in: [3, 3],
+    })
+    expect(
+      toValueOrInOrNil(['foo', 'bar'] as const, (x) => x.length),
+    ).toMatchObject({
       $in: [3, 3],
     })
   })

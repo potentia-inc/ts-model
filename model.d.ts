@@ -138,6 +138,6 @@ export declare function toExistsOrNil($exists?: boolean | null): {
     $exists: boolean;
 } | Nil;
 export declare function toUnsetOrNil<T extends object>(values: T, key: keyof T): true | Nil;
-export declare function toValueOrInOrNil<S, T = S>(x: Nil | null | S | S[], map?: (x: S) => T): T | {
+export declare function toValueOrInOrNil<S, T = S>(x: Nil | null | S | readonly S[], map?: (x: S) => T): T | {
     $in: T[];
 } | Nil;

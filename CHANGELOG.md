@@ -1,5 +1,9 @@
 # Change log
 
+## [2.0.1] - 2025-04-20
+
+- Make array readonly for `toValueOrInOrNil()`
+
 ## [2.0.0] - 2025-04-09
 
 - Introduce `findManyToMapBy()` to form the query results to a `Map`

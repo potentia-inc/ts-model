@@ -418,7 +418,7 @@ export function toUnsetOrNil<T extends object>(
 }
 
 export function toValueOrInOrNil<S, T = S>(
-  x: Nil | null | S | S[],
+  x: Nil | null | S | readonly S[],
   map: (x: S) => T = (x: S) => x as unknown as T,
 ): T | { $in: T[] } | Nil {
   if (isNullish(x)) return Nil

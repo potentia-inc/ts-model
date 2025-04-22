@@ -1,5 +1,9 @@
 # Change log
 
+## [2.1.0] - 2025-04-22
+
+- Introduce new query builder `toValueOrAbsentOrNil()`
+
 ## [2.0.1] - 2025-04-20
 
 - Make array readonly for `toValueOrInOrNil()`

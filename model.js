@@ -257,6 +257,9 @@ export function getSortKey(sort) {
 export function toValueOrAbsent(value) {
     return isNullish(value) ? { $exists: false } : value;
 }
+export function toValueOrAbsentOrNil(values, key) {
+    return key in values ? toValueOrAbsent(values[key]) : Nil;
+}
 export function toExistsOrNil($exists) {
     return isNullish($exists) ? Nil : { $exists };
 }

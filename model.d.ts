@@ -132,8 +132,11 @@ export type Pagination<S> = {
 export declare function getSortKey(sort?: Sort): string | undefined;
 export type InsertionOf<T> = Omit<T, 'created_at'>;
 export declare function toValueOrAbsent<T>(value?: T | null): T | {
-    $exists: boolean;
+    $exists: false;
 };
+export declare function toValueOrAbsentOrNil<T extends object, K extends keyof T>(values: T, key: K): T[K] | {
+    $exists: false;
+} | Nil;
 export declare function toExistsOrNil($exists?: boolean | null): {
     $exists: boolean;
 } | Nil;

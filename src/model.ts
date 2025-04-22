@@ -400,8 +400,15 @@ export function getSortKey(sort?: Sort) {
 
 export type InsertionOf<T> = Omit<T, 'created_at'>
 
-export function toValueOrAbsent<T>(value?: T | null) {
+export function toValueOrAbsent<T>(value?: T | null): T | { $exists: false } {
   return isNullish(value) ? { $exists: false } : value
+}
+
+export function toValueOrAbsentOrNil<T extends object, K extends keyof T>(
+  values: T,
+  key: K,
+): T[K] | { $exists: false } | Nil {
+  return key in values ? toValueOrAbsent(values[key]) : Nil
 }
 
 export function toExistsOrNil(

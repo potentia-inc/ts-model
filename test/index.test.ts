@@ -15,6 +15,7 @@ import {
   toExistsOrNil,
   toUnsetOrNil,
   toValueOrAbsent,
+  toValueOrAbsentOrNil,
   toValueOrInOrNil,
 } from '../src/model.js'
 import { Connection } from '../src/mongo.js'
@@ -303,6 +304,12 @@ describe('model', () => {
     expect(toValueOrAbsent('foo')).toBe('foo')
     expect(toValueOrAbsent([0, 1])).toMatchObject([0, 1])
     expect(toValueOrAbsent({ foo: 'bar' })).toMatchObject({ foo: 'bar' })
+
+    expect(toValueOrAbsentOrNil({ foo: Nil }, 'foo')).toMatchObject({
+      $exists: false,
+    })
+    expect(toValueOrAbsentOrNil({} as { foo?: string }, 'foo')).toBeNil()
+    expect(toValueOrAbsentOrNil({ foo: 'bar' }, 'foo')).toBe('bar')
 
     expect(toExistsOrNil(Nil)).toBe(Nil)
     expect(toExistsOrNil(null)).toBe(Nil)

@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { ConflictError, NotFoundError, UnacknowledgedError } from './error.js';
 import { isDuplicationError, } from './mongo.js';
-import { ObjectId, Uuid, Nil, isNullish } from './type.js';
+import { Nil, isNullish } from './type.js';
 export { isDuplicationError } from './mongo.js';
 export const TIMESTAMP_SCHEMA = {
     created_at: { bsonType: 'date' },
@@ -33,13 +33,18 @@ export class Model {
         this.updatedAt = doc.updated_at;
     }
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function pickId(x) {
-    return typeof x === 'number' || typeof x === 'string' || x instanceof Uuid
-        ? x
-        : x.id;
+function isModelLike(x) {
+    return (typeof x === 'object' &&
+        x !== null &&
+        'id' in x &&
+        'createdAt' in x &&
+        x.createdAt instanceof Date &&
+        'updatedAt' in x &&
+        (x.updatedAt === Nil || x.updatedAt instanceof Date));
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function pickId(x) {
+    return isModelLike(x) ? x.id : x;
+}
 export function pickIdOrNil(x) {
     return isNullish(x) ? Nil : pickId(x);
 }
@@ -74,7 +79,7 @@ export class Models {
         return Nil;
     }
     async find(id, options = {}) {
-        const _id = modelsPickId(id);
+        const _id = pickId(id);
         if (_id !== id)
             return id;
         const found = await this.collection.findOne({ _id }, options);
@@ -110,25 +115,19 @@ export class Models {
     }
     async paginate(query = {}, pagination = {}, options = {}) {
         const max = 1000;
-        const { sort, offset = 0, begin, end } = pagination;
-        assert(!isNullish(sort));
+        const { offset = 0 } = pagination;
         const limit = Math.min(pagination.limit ?? max, max);
         assert(offset >= 0 && Number.isInteger(offset));
         assert(limit >= 0 && limit <= max && Number.isInteger(limit));
-        const rawsort = this.$sort(sort);
-        const key = getSortKey(rawsort);
-        assert(!isNullish(rawsort) && !isNullish(key));
-        const filter = {
-            ...query,
-            ...(isNullish(begin) && isNullish(end)
-                ? {}
-                : { [key]: { $gte: begin, $lt: end } }),
-        };
+        const filter = this.$query(query);
         const count = await this.collection.countDocuments(filter, options);
         const cursor = this.collection.find(filter, options);
-        const docs = await cursor.sort(rawsort).skip(offset).limit(limit).toArray();
+        const sort = this.$sort(pagination.sort);
+        if (!isNullish(sort))
+            cursor.sort(sort);
+        const docs = await cursor.skip(offset).limit(limit).toArray();
         return [
-            { sort, offset, limit, count, begin, end },
+            { sort: pagination.sort, offset, limit, count },
             docs.map((x) => this.$model(x, options)),
         ];
     }
@@ -175,7 +174,7 @@ export class Models {
     }
     async updateOne(id, values, options = {}) {
         const $options = { ...options, $now: options.$now ?? new Date() };
-        const updated = await this.collection.findOneAndUpdate({ _id: modelsPickId(id) }, {
+        const updated = await this.collection.findOneAndUpdate({ _id: pickId(id) }, {
             $inc: this.$inc(values, $options),
             $set: { updated_at: $options.$now, ...this.$set(values, $options) },
             $unset: this.$unset(values, $options),
@@ -194,7 +193,7 @@ export class Models {
         return modifiedCount;
     }
     async deleteOne(id, options = {}) {
-        const { deletedCount } = await this.collection.deleteOne({ _id: modelsPickId(id) }, options);
+        const { deletedCount } = await this.collection.deleteOne({ _id: pickId(id) }, options);
         if (deletedCount !== 1)
             throw new NotFoundError(`Not Found: ${this.name}`);
     }
@@ -224,14 +223,6 @@ export class Cursor {
         return (await this.#cursor.toArray()).map((x) => this.#model(x, options));
     }
 }
-function modelsPickId(x) {
-    return typeof x === 'number' ||
-        typeof x === 'string' ||
-        x instanceof ObjectId ||
-        x instanceof Uuid
-        ? x
-        : x.id;
-}
 export function getSortKey(sort) {
     if (typeof sort === 'string')
         return sort;
@@ -257,8 +248,8 @@ export function getSortKey(sort) {
 export function toValueOrAbsent(value) {
     return isNullish(value) ? { $exists: false } : value;
 }
-export function toValueOrAbsentOrNil(values, key) {
-    return key in values ? toValueOrAbsent(values[key]) : Nil;
+export function toValueOrAbsentOrNil(values, key, map = (x) => isNullish(x) ? Nil : x) {
+    return key in values ? toValueOrAbsent(map(values[key])) : Nil;
 }
 export function toExistsOrNil($exists) {
     return isNullish($exists) ? Nil : { $exists };
@@ -272,5 +263,10 @@ export function toValueOrInOrNil(x, map = (x) => x) {
     if (Array.isArray(x))
         return { $in: x.map(map) };
     return map(x);
+}
+export function toRangeOrNil({ begin, end, } = {}, inclusiveEnd = false) {
+    return isNullish(begin) && isNullish(end)
+        ? Nil
+        : { $gte: begin, [inclusiveEnd ? '$lte' : '$lt']: end };
 }
 //# sourceMappingURL=model.js.map

@@ -8,7 +8,7 @@ VOLUME=$(PWD):$(WORKDIR)
 test:
 	docker compose build --pull
 	docker compose run test || true
-	docker compose down
+	docker compose down --remove-orphans
 
 clean:
 	docker run --rm -u $(USER) -w $(WORKDIR) -v $(VOLUME) $(IMAGE) npm run clean

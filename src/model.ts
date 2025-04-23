@@ -26,6 +26,8 @@ export const TIMESTAMP_SCHEMA = {
   updated_at: { bsonType: 'date' },
 }
 
+type Doc<Id> = { _id: Id } & Timestamp
+
 export type NumberDoc = { _id: number } & Timestamp
 export const NUMBER_DOC_SCHEMA = {
   _id: { type: 'number' },
@@ -50,7 +52,7 @@ export const OBJECTID_DOC_SCHEMA = {
   ...TIMESTAMP_SCHEMA,
 }
 
-export class Model<D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc> {
+export class Model<D extends Doc<unknown>> {
   id: D['_id']
   createdAt: Date
   updatedAt?: Date
@@ -62,35 +64,43 @@ export class Model<D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc> {
   }
 }
 
+type ModelLike<Id> = {
+  id: Id
+  createdAt: Date
+  updatedAt?: Date
+}
 export type ModelOrId<
-  D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc,
-  M extends Model<D>,
+  M extends {
+    id: unknown
+    createdAt: Date
+    updatedAt?: Date
+  },
 > = M | M['id']
 
-export function pickId(x: number | Model<NumberDoc>): number
-export function pickId(x: string | Model<StringDoc>): string
-export function pickId(x: ObjectId | Model<ObjectIdDoc>): ObjectId
-export function pickId(x: Uuid | Model<UuidDoc>): Uuid
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function pickId(x: any): any {
-  return typeof x === 'number' || typeof x === 'string' || x instanceof Uuid
-    ? x
-    : x.id
+function isModelLike<Id>(x: unknown): x is ModelLike<Id> {
+  return (
+    typeof x === 'object' &&
+    x !== null &&
+    'id' in x &&
+    'createdAt' in x &&
+    x.createdAt instanceof Date &&
+    'updatedAt' in x &&
+    (x.updatedAt === Nil || x.updatedAt instanceof Date)
+  )
 }
 
-export function pickIdOrNil(x?: number | Model<NumberDoc>): number | Nil
-export function pickIdOrNil(x?: string | Model<StringDoc>): string | Nil
-export function pickIdOrNil(x?: ObjectId | Model<ObjectIdDoc>): ObjectId | Nil
-export function pickIdOrNil(x?: Uuid | Model<UuidDoc>): Uuid | Nil
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function pickIdOrNil(x?: any): any {
-  return isNullish(x) ? Nil : pickId(x)
+export function pickId<Id>(x: ModelLike<Id> | Id): Id {
+  return isModelLike(x) ? x.id : x
+}
+
+export function pickIdOrNil<Id>(x?: ModelLike<Id> | Id | null): Id | Nil {
+  return isNullish(x) ? Nil : pickId<Id>(x)
 }
 
 export type Options = CommandOperationOptions & { $now?: Date }
 
 export abstract class Models<
-  D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc,
+  D extends Doc<unknown>,
   M extends Model<D>,
   Q,
   I,
@@ -136,8 +146,8 @@ export abstract class Models<
     return Nil
   }
 
-  async find(id: ModelOrId<D, M>, options: Options = {}): Promise<M> {
-    const _id = modelsPickId(id)
+  async find(id: ModelOrId<M>, options: Options = {}): Promise<M> {
+    const _id = pickId(id)
     if (_id !== id) return id as M
     const found = await this.collection.findOne({ _id } as Filter<D>, options)
     if (isNullish(found)) throw new NotFoundError(`Not Found: ${this.name}`)
@@ -195,25 +205,18 @@ export abstract class Models<
     options: Options = {},
   ): Promise<[Pagination<S>, M[]]> {
     const max = 1000
-    const { sort, offset = 0, begin, end } = pagination
-    assert(!isNullish(sort))
+    const { offset = 0 } = pagination
     const limit = Math.min(pagination.limit ?? max, max)
     assert(offset >= 0 && Number.isInteger(offset))
     assert(limit >= 0 && limit <= max && Number.isInteger(limit))
-    const rawsort = this.$sort(sort)
-    const key = getSortKey(rawsort)
-    assert(!isNullish(rawsort) && !isNullish(key))
-    const filter = {
-      ...query,
-      ...(isNullish(begin) && isNullish(end)
-        ? {}
-        : { [key]: { $gte: begin, $lt: end } }),
-    } as Filter<D>
+    const filter = this.$query(query)
     const count = await this.collection.countDocuments(filter, options)
     const cursor = this.collection.find(filter, options)
-    const docs = await cursor.sort(rawsort).skip(offset).limit(limit).toArray()
+    const sort = this.$sort(pagination.sort)
+    if (!isNullish(sort)) cursor.sort(sort)
+    const docs = await cursor.skip(offset).limit(limit).toArray()
     return [
-      { sort, offset, limit, count, begin, end },
+      { sort: pagination.sort, offset, limit, count },
       docs.map((x) => this.$model(x, options)),
     ]
   }
@@ -267,13 +270,13 @@ export abstract class Models<
   }
 
   async updateOne(
-    id: ModelOrId<D, M>,
+    id: ModelOrId<M>,
     values: U,
     options: Options = {},
   ): Promise<M> {
     const $options = { ...options, $now: options.$now ?? new Date() }
     const updated = await this.collection.findOneAndUpdate(
-      { _id: modelsPickId(id) } as Filter<D>,
+      { _id: pickId(id) } as Filter<D>,
       {
         $inc: this.$inc(values, $options),
         $set: { updated_at: $options.$now, ...this.$set(values, $options) },
@@ -303,9 +306,9 @@ export abstract class Models<
     return modifiedCount
   }
 
-  async deleteOne(id: ModelOrId<D, M>, options: Options = {}): Promise<void> {
+  async deleteOne(id: ModelOrId<M>, options: Options = {}): Promise<void> {
     const { deletedCount } = await this.collection.deleteOne(
-      { _id: modelsPickId(id) } as Filter<D>,
+      { _id: pickId(id) } as Filter<D>,
       options,
     )
     if (deletedCount !== 1) throw new NotFoundError(`Not Found: ${this.name}`)
@@ -320,10 +323,7 @@ export abstract class Models<
   }
 }
 
-export class Cursor<
-  D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc,
-  M extends Model<D>,
-> {
+export class Cursor<D extends Doc<unknown>, M extends Model<D>> {
   #model: (d: D | WithId<D>, options?: Options) => M
   #cursor: FindCursor<WithId<D>>
 
@@ -351,24 +351,10 @@ export class Cursor<
 }
 
 export type Pagination<S> = {
-  sort: S
+  sort?: S
   offset: number
   limit: number
   count: number
-  begin?: Date
-  end?: Date
-}
-
-function modelsPickId<
-  D extends NumberDoc | StringDoc | ObjectIdDoc | UuidDoc,
-  M extends Model<D>,
->(x: M | M['id']): M['id'] {
-  return typeof x === 'number' ||
-    typeof x === 'string' ||
-    x instanceof ObjectId ||
-    x instanceof Uuid
-    ? x
-    : x.id
 }
 
 export function getSortKey(sort?: Sort) {
@@ -404,11 +390,17 @@ export function toValueOrAbsent<T>(value?: T | null): T | { $exists: false } {
   return isNullish(value) ? { $exists: false } : value
 }
 
-export function toValueOrAbsentOrNil<T extends object, K extends keyof T>(
+export function toValueOrAbsentOrNil<
+  T extends object,
+  K extends keyof T,
+  S = T[K],
+>(
   values: T,
   key: K,
-): T[K] | { $exists: false } | Nil {
-  return key in values ? toValueOrAbsent(values[key]) : Nil
+  map: (x?: T[K] | null) => S | Nil = (x?: T[K] | null) =>
+    isNullish(x) ? Nil : (x as unknown as S),
+): S | { $exists: false } | Nil {
+  return key in values ? toValueOrAbsent(map(values[key])) : Nil
 }
 
 export function toExistsOrNil(
@@ -431,4 +423,19 @@ export function toValueOrInOrNil<S, T = S>(
   if (isNullish(x)) return Nil
   if (Array.isArray(x)) return { $in: x.map(map) }
   return map(x as S)
+}
+
+export function toRangeOrNil<B, E>(
+  {
+    begin,
+    end,
+  }: {
+    begin?: B
+    end?: E
+  } = {},
+  inclusiveEnd = false,
+) {
+  return isNullish(begin) && isNullish(end)
+    ? Nil
+    : { $gte: begin, [inclusiveEnd ? '$lte' : '$lt']: end }
 }

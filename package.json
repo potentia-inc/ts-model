@@ -38,6 +38,8 @@
   "exports": {
     ".": "./model.js",
     "./error": "./error.js",
+    "./error/lock": "./error/lock.js",
+    "./lock": "./lock.js",
     "./mongo": "./mongo.js",
     "./type": "./type.js",
     "./util": "./util.js"

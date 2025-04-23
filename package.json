@@ -39,9 +39,11 @@
     ".": "./model.js",
     "./error": "./error.js",
     "./error/lock": "./error/lock.js",
+    "./error/upstream": "./error/upstream.js",
     "./lock": "./lock.js",
     "./mongo": "./mongo.js",
     "./type": "./type.js",
+    "./upstream": "./upstream.js",
     "./util": "./util.js"
   },
   "engines": {

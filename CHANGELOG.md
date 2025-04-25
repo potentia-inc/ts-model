@@ -1,5 +1,9 @@
 # Change log
 
+## [3.1.0] - 2025-04-25
+
+- Introduce UpstreamPool and deprecate Pool
+
 ## [3.0.0] - 2025-04-23
 
 - Support custom id type

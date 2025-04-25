@@ -1,6 +1,6 @@
 {
   "name": "@potentia/model",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "model",
   "main": "./index.js",
   "scripts": {
@@ -44,6 +44,7 @@
     "./mongo": "./mongo.js",
     "./type": "./type.js",
     "./upstream": "./upstream.js",
+    "./upstream/pool": "./upstream-pool.js",
     "./util": "./util.js"
   },
   "engines": {

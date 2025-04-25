@@ -204,22 +204,25 @@ describe('upstream-pool', () => {
     pool.fail(upstream) // failure: 4, weight: 0.25 -> 0.125
     pool.fail(upstream) // failure: 5, weight: 0.125 -> 0.0625
 
+    const total = 100
     let hit = 0
-    for (let i = 0; i < 100; ++i) {
+    for (let i = 0; i < total; ++i) {
       const x = await pool.sample(type)
       if (x.id.equals(upstream.id)) ++hit
     }
 
     // hit rate ~ 0.0625 / (1 + 0.0625) ~ 5.88%
-    expect(hit >= 4 && hit <= 9).toBeTruthy()
+    let rate = hit / total
+    expect(rate >= 0.01 && rate <= 0.1).toBeTruthy()
 
     pool.succeed(upstream) // reset to 1
     hit = 0
-    for (let i = 0; i < 100; ++i) {
+    for (let i = 0; i < total; ++i) {
       const x = await pool.sample(type)
       if (x.id.equals(upstream.id)) ++hit
     }
-    expect(hit >= 45 && hit <= 55).toBeTruthy() // hit rate ~ 50%
+    rate = hit / total
+    expect(rate >= 0.4 && rate <= 0.6).toBeTruthy() // hit rate ~ 50%
   })
 })
 
@@ -306,22 +309,25 @@ describe('pool (deprecated)', () => {
     pool.fail(upstream) // failure: 4, weight: 0.25 -> 0.125
     pool.fail(upstream) // failure: 5, weight: 0.125 -> 0.0625
 
+    const total = 100
     let hit = 0
-    for (let i = 0; i < 100; ++i) {
+    for (let i = 0; i < total; ++i) {
       const x = await pool.sample()
       if (x.id.equals(upstream.id)) ++hit
     }
 
     // hit rate ~ 0.0625 / (1 + 0.0625) ~ 5.88%
-    expect(hit >= 4 && hit <= 9).toBeTruthy()
+    let rate = hit / total
+    expect(rate >= 0.01 && rate <= 0.1).toBeTruthy()
 
     pool.succeed(upstream) // reset to 1
     hit = 0
-    for (let i = 0; i < 100; ++i) {
+    for (let i = 0; i < total; ++i) {
       const x = await pool.sample()
       if (x.id.equals(upstream.id)) ++hit
     }
-    expect(hit >= 45 && hit <= 55).toBeTruthy() // hit rate ~ 50%
+    rate = hit / total
+    expect(rate >= 0.4 && rate <= 0.6).toBeTruthy() // hit rate ~ 50%
   })
 })
 

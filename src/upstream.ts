@@ -231,6 +231,9 @@ type PoolOptions = {
   decay: number
 }
 
+/*
+ * @deprecated Use UpstreamPool instead
+ */
 export class Pool {
   #upstreams: Upstreams
   #type: string

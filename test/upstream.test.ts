@@ -4,12 +4,13 @@ import { NoUpstreamError } from '../src/error/upstream.js'
 import { Connection } from '../src/mongo.js'
 import { Nil, isNullish, toUuid } from '../src/type.js'
 import {
-  Pool,
+  Pool, // deprecated
   UPSTREAM_SCHEMA,
   UpstreamInsert,
   UpstreamQuery,
   Upstreams,
 } from '../src/upstream.js'
+import { UpstreamPool } from '../src/upstream-pool.js'
 import { sleep } from '../src/util.js'
 
 const { MONGO_URI } = process.env
@@ -91,7 +92,138 @@ describe('upstream', () => {
   })
 })
 
-describe('pool', () => {
+describe('upstream-pool', () => {
+  test('sync', async () => {
+    const pool = new UpstreamPool({
+      load: (type) => UPSTREAMS.findMany({ type, gtWeight: 0 }),
+      init: () => ({ ttl: 3 }),
+    })
+
+    const type = randStr()
+    await insertUpstreams({ type, host: randStr(), weight: 1 })
+
+    expect(await pool.sample(type)).not.toBeUndefined()
+    // no upstream for other type
+    await expect(() => pool.sample(randStr())).rejects.toThrow(NoUpstreamError)
+
+    await deleteUpstreams({ type })
+    expect(await pool.sample(type)).not.toBeUndefined() // not sync yet
+
+    await sleep(4000)
+    await expect(() => pool.sample(type)).rejects.toThrow(NoUpstreamError)
+  })
+
+  test('NoUpstreamError', async () => {
+    const pool = new UpstreamPool({
+      load: (type) => UPSTREAMS.findMany({ type, gtWeight: 0 }),
+      init: () => ({ ttl: 3 }),
+    })
+
+    const type = randStr()
+    await insertUpstreams({ type, host: randStr() }) // no weight
+    await expect(() => pool.sample(type)).rejects.toThrow(NoUpstreamError)
+  })
+
+  test('same', async () => {
+    const pool = new UpstreamPool({
+      load: (type) => UPSTREAMS.findMany({ type, gtWeight: 0 }),
+      init: () => ({ ttl: 10 }),
+    })
+
+    const type = randStr()
+    await insertUpstreams({ type, host: randStr(), weight: 1 }, 10)
+    const upstream = await pool.sample(type)
+    for (let i = 0; i < 20; ++i) {
+      const sampled = await pool.sample(type, { type: 'same', upstream })
+      expect(sampled.id).toEqualUuid(upstream.id)
+    }
+    await deleteUpstreams({ type })
+  })
+
+  test('same but get different upstream', async () => {
+    const pool = new UpstreamPool({
+      load: (type) => UPSTREAMS.findMany({ type, gtWeight: 0 }),
+      init: () => ({ ttl: 10 }),
+    })
+
+    const type = randStr()
+    await insertUpstreams({ type, host: randStr(), weight: 1 })
+    const id = toUuid()
+    for (let i = 0; i < 20; ++i) {
+      const upstream = await pool.sample(type, { type: 'same', upstream: id })
+      expect(upstream.id).not.toEqualUuid(id)
+    }
+    await deleteUpstreams({ type })
+  })
+
+  test('diff', async () => {
+    const pool = new UpstreamPool({
+      load: (type) => UPSTREAMS.findMany({ type, gtWeight: 0 }),
+      init: () => ({ ttl: 10 }),
+    })
+
+    const type = randStr()
+    await insertUpstreams({ type, host: randStr(), weight: 1 }, 2)
+    const upstream = await pool.sample(type)
+    for (let i = 0; i < 20; ++i) {
+      const sampled = await pool.sample(type, { type: 'diff', upstream })
+      expect(sampled.id).not.toEqualUuid(upstream.id)
+    }
+    await deleteUpstreams({ type })
+  })
+
+  test('diff but get same upstream', async () => {
+    const pool = new UpstreamPool({
+      load: (type) => UPSTREAMS.findMany({ type, gtWeight: 0 }),
+      init: () => ({ ttl: 10 }),
+    })
+
+    const type = randStr()
+    await insertUpstreams({ type, host: randStr(), weight: 1 }, 1)
+    const upstream = await pool.sample(type)
+    for (let i = 0; i < 20; ++i) {
+      const sampled = await pool.sample(type, { type: 'diff', upstream })
+      expect(sampled.id).toEqualUuid(upstream.id)
+    }
+    await deleteUpstreams({ type })
+  })
+
+  test('weight decay', async () => {
+    const pool = new UpstreamPool({
+      load: (type) => UPSTREAMS.findMany({ type, gtWeight: 0 }),
+      init: () => ({ ttl: 10, minFailures: 2, decay: 0.5 }),
+    })
+
+    const type = randStr()
+    await insertUpstreams({ type, host: randStr(), weight: 1 }, 2)
+
+    const upstream = await pool.sample(type)
+    pool.fail(upstream) // failure: 1, weight: 1
+    pool.fail(upstream) // failure: 2, weight: 1 -> 0.5
+    pool.fail(upstream) // failure: 3, weight: 0.5 -> 0.25
+    pool.fail(upstream) // failure: 4, weight: 0.25 -> 0.125
+    pool.fail(upstream) // failure: 5, weight: 0.125 -> 0.0625
+
+    let hit = 0
+    for (let i = 0; i < 100; ++i) {
+      const x = await pool.sample(type)
+      if (x.id.equals(upstream.id)) ++hit
+    }
+
+    // hit rate ~ 0.0625 / (1 + 0.0625) ~ 5.88%
+    expect(hit >= 4 && hit <= 9).toBeTruthy()
+
+    pool.succeed(upstream) // reset to 1
+    hit = 0
+    for (let i = 0; i < 100; ++i) {
+      const x = await pool.sample(type)
+      if (x.id.equals(upstream.id)) ++hit
+    }
+    expect(hit >= 45 && hit <= 55).toBeTruthy() // hit rate ~ 50%
+  })
+})
+
+describe('pool (deprecated)', () => {
   test('sync', async () => {
     const type = randStr()
     const pool = new Pool(UPSTREAMS, type, { ttl: 3 })

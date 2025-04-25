@@ -63,17 +63,17 @@ if (lock !== undefined) {
 }
 ```
 
-## Upstream and Pool
+## Upstream
 
 ```typescript
-import { Pool, Upstreams } from '@potentia/model/upstream'
+import { Upstreams } from '@potentia/model/upstream'
 import {
   UpstreamError, // Base class for all upstream-related errors
   NoUpstreamError, // Thrown when no upstream is available
 } from '@potentia/model/error/upstream'
 
 const upstreams = new Upstreams({ connection: ... })
-const u = await upstreams.insertOne({
+const upstream = await upstreams.insertOne({
   type: 'foobar',
   host: 'https://foobar.com/api',
   path: 'foo',
@@ -87,52 +87,71 @@ const u = await upstreams.insertOne({
   weight: 0.5,
 })
 
-u.url() // URL object
-u.url().toString() // https://foobar.com/api/foo?a=foo&b=bar
-u.link() // the same as u.url().toString()
-u.link({
+upstream.url() // URL object
+upstream.url().toString() // https://foobar.com/api/foo?a=foo&b=bar
+upstream.link() // the same as u.url().toString()
+upstream.link({
   path: 'bar',
   searchs: { c: 'foobar' },
 }) // https://foobar.com/api/bar?a=foo&b=bar&c=foobar
+```
 
+## UpstreamPool
 
-const pool = new Pool(upstreams, 'foobar', {
-  // TTL (in seconds) for the upstream cache.
-  // Default: 60 (syncs with the database every 60 seconds).
-  ttl: 60,
+```typescript
+import { Upstreams } from '@potentia/model/upstream'
+import { UpstreamPool } from '@potentia/model/upstream/pool'
 
-  // Enables weight decay when the failure count reaches minFailures.
-  // Default: 0.
-  minFailures: 0,
+const upstreams = new Upstreams({ connection: ... })
+const pool = new UpstreamPool({
+  // the function to load the upstreams is required
+  load: (type: string) => upstreams.findMany({ type, gtWeight: 0 }),
 
-  // Mimimum weight after decay. Default: 0.01.
-  minWeight: 0.1,
+  // the function to set the pool parameters is optional
+  init: (type: string) => {
+    // set pool parameters for a specific type
+    if (type === '...') return { ... }
 
-  // Decay factor applied to weight. Default: 0.8.
-  decay: 0.5,
+    // or set pool parameters for all types
+    return {
+      // TTL (in seconds) for the upstream cache.
+      // Default: 60 (load upstreams every 60 seconds).
+      ttl: 60,
+
+      /*
+      Weight decay logic:
+        if success:
+          reset weight to its original value
+        if failure:
+          if failure count >= minFailures:
+            weight = weight * decay
+      */
+
+      // Enables weight decay when the failure count reaches minFailures.
+      // Default: 0.
+      minFailures: 0,
+
+      // Mimimum weight after decay. Default: 0.01.
+      minWeight: 0.1,
+
+      // Decay factor applied to weight. Default: 0.8.
+      decay: 0.5,
+    }
+  }
 })
 
-/*
-Weight decay logic:
-  if success:
-    reset weight to its original value
-  if failure:
-    if failure count >= minFailures:
-      weight = weight * decay
-*/
-
 // Select an upstream randomly, weighted by upstream.weight.
-const u = await pool.sample()
+const upstream = await pool.sample(type)
 
 // Pick the given upstream if available.
-await pool.sample({ type: 'same', upstream: u })
+await pool.sample(type, { type: 'same', upstream })
 
 // Pick a different upstream if possible.
-await pool.sample({ type: 'diff', upstream: u })
+await pool.sample(type, { type: 'diff', upstream })
 
-// Marks u as successful (resets the failure count to 0).
-pool.succeed(u)
+// Marks `upstream` as successful (resets the failure count to 0).
+pool.succeed(upstream)
 
-// Marks u as failed (increments the failure count).
-pool.fail(u)
+// Marks `upstream` as failed (increments the failure count).
+pool.fail(upstream)
 ```

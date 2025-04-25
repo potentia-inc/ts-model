@@ -44,6 +44,7 @@
     "./mongo": "./mongo.js",
     "./type": "./type.js",
     "./upstream": "./upstream.js",
+    "./upstream/pool": "./upstream-pool.js",
     "./util": "./util.js"
   },
   "engines": {

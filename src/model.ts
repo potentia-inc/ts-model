@@ -4,8 +4,8 @@ import {
   Collection,
   CommandOperationOptions,
   Connection,
+  ExplainableCursor,
   Filter,
-  FindCursor,
   isDuplicationError,
   OptionalUnlessRequiredId,
   Sort,
@@ -196,7 +196,10 @@ export abstract class Models<
     if (!isNullish(sort)) cursor.sort(sort)
     if (!isNullish(offset)) cursor.skip(offset)
     if (!isNullish(limit)) cursor.limit(limit)
-    return new Cursor<D, M>((x) => this.$model(x, options), cursor)
+    return new Cursor<D, M>(
+      (x) => this.$model(x, options),
+      cursor as unknown as ExplainableCursor<D>, // make the typescript happy
+    )
   }
 
   async paginate(
@@ -323,6 +326,34 @@ export abstract class Models<
   }
 }
 
+class Cursor<D extends Doc<unknown>, M extends Model<D>> {
+  #model: (d: D | WithId<D>, options?: Options) => M
+  #cursor: ExplainableCursor<D>
+
+  constructor(
+    model: (d: D | WithId<D>, options?: Options) => M,
+    cursor: ExplainableCursor<D>,
+  ) {
+    this.#model = model
+    this.#cursor = cursor
+  }
+
+  async *[Symbol.asyncIterator]() {
+    try {
+      for await (const x of this.#cursor) {
+        yield this.#model(x)
+      }
+    } finally {
+      await this.#cursor.close()
+    }
+  }
+
+  async toArray(options?: Options) {
+    return (await this.#cursor.toArray()).map((x) => this.#model(x, options))
+  }
+}
+
+/*
 export class Cursor<D extends Doc<unknown>, M extends Model<D>> {
   #model: (d: D | WithId<D>, options?: Options) => M
   #cursor: FindCursor<WithId<D>>
@@ -349,6 +380,7 @@ export class Cursor<D extends Doc<unknown>, M extends Model<D>> {
     return (await this.#cursor.toArray()).map((x) => this.#model(x, options))
   }
 }
+*/
 
 export type Pagination<S> = {
   sort?: S

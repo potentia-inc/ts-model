@@ -202,7 +202,7 @@ export class Models {
         return deletedCount;
     }
 }
-export class Cursor {
+class Cursor {
     #model;
     #cursor;
     constructor(model, cursor) {

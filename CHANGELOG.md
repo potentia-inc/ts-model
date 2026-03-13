@@ -1,5 +1,11 @@
 # Change log
 
+## [4.0.0] - 2026-03-13
+
+- Bump minimum Node.js version to 24
+- Migrate from @potentia/mongodb6 to @potentia/mongodb7
+- Remove deprecated Pool
+
 ## [3.1.0] - 2025-04-25
 
 - Introduce UpstreamPool and deprecate Pool

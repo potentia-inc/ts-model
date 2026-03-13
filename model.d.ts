@@ -1,4 +1,4 @@
-import { Collection, CommandOperationOptions, Connection, Filter, FindCursor, OptionalUnlessRequiredId, Sort, UpdateFilter, WithId } from './mongo.js';
+import { Collection, CommandOperationOptions, Connection, ExplainableCursor, Filter, OptionalUnlessRequiredId, Sort, UpdateFilter, WithId } from './mongo.js';
 import { ObjectId, Uuid, Nil, TypeOrNil } from './type.js';
 export { Filter, WithId, UpdateFilter, isDuplicationError } from './mongo.js';
 export type Timestamp = {
@@ -121,9 +121,9 @@ export declare abstract class Models<D extends Doc<unknown>, M extends Model<D>,
     deleteOne(id: ModelOrId<M>, options?: Options): Promise<void>;
     deleteMany(query?: Q, options?: Options): Promise<number>;
 }
-export declare class Cursor<D extends Doc<unknown>, M extends Model<D>> {
+declare class Cursor<D extends Doc<unknown>, M extends Model<D>> {
     #private;
-    constructor(model: (d: D | WithId<D>, options?: Options) => M, cursor: FindCursor<WithId<D>>);
+    constructor(model: (d: D | WithId<D>, options?: Options) => M, cursor: ExplainableCursor<D>);
     [Symbol.asyncIterator](): AsyncGenerator<M, void, unknown>;
     toArray(options?: Options): Promise<M[]>;
 }
@@ -133,7 +133,7 @@ export type Pagination<S> = {
     limit: number;
     count: number;
 };
-export declare function getSortKey(sort?: Sort): string | undefined;
+export declare function getSortKey(sort?: Sort): any;
 export type InsertionOf<T> = Omit<T, 'created_at'>;
 export declare function toValueOrAbsent<T>(value?: T | null): T | {
     $exists: false;

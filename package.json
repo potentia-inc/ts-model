@@ -1,6 +1,6 @@
 {
   "name": "@potentia/model",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "description": "model",
   "main": "./index.js",
   "scripts": {
@@ -32,7 +32,7 @@
     "typescript-eslint": "^8.0.0"
   },
   "peerDependencies": {
-    "@potentia/mongodb6": "github:potentia-inc/ts-mongodb6#semver:^2.0.0",
+    "@potentia/mongodb7": "github:potentia-inc/ts-mongodb7#semver:^1.0.0",
     "@potentia/util": "github:potentia-inc/ts-util#semver:^3.2.0"
   },
   "type": "module",

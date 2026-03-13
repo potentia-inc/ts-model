@@ -1,2 +1,2 @@
-export * from '@potentia/mongodb6/connection'
-export * from '@potentia/mongodb6/mongo'
+export * from '@potentia/mongodb7/connection'
+export * from '@potentia/mongodb7/mongo'
